@@ -6,7 +6,9 @@ import (
 	"image/color"
 	"image/draw"
 	"log"
+	"math/rand"
 	"os"
+	"time"
 
 	_ "image/jpeg"
 	_ "image/png"
@@ -16,6 +18,7 @@ import (
 
 type PointPair struct {
 	P1, P2 image.Point
+	Color  color.RGBA
 }
 
 type TextureWithSize struct {
@@ -267,7 +270,6 @@ func imageWithPoints(imgPath string, pairIndex int, isPrevImage bool, scaledSize
 			}
 		}
 
-		pointColor := color.RGBA{R: 255, G: 0, B: 0, A: 255}
 		if pointPairs, ok := points[pairIndex]; ok {
 			for i, p := range pointPairs {
 				var pointOnImage image.Point
@@ -280,7 +282,21 @@ func imageWithPoints(imgPath string, pairIndex int, isPrevImage bool, scaledSize
 				scaledX := int(float32(pointOnImage.X) * scaleX)
 				scaledY := int(float32(pointOnImage.Y) * scaleY)
 				drawPos := startPos.Add(image.Pt(scaledX, scaledY))
-				canvas.AddCircleFilled(drawPos, 4, pointColor)
+
+				// Flashing logic for the non-dragged point
+				isOppositePoint := draggingPoint.isDragging &&
+					draggingPoint.pairSetIndex == pairIndex &&
+					draggingPoint.pairIndex == i &&
+					((isPrevImage && !draggingPoint.isP1) || (!isPrevImage && draggingPoint.isP1))
+
+				if isOppositePoint {
+					// Flash every half second
+					if time.Now().UnixMilli()/500%2 == 0 {
+						canvas.AddCircle(drawPos, 8, color.RGBA{R: 255, G: 255, B: 0, A: 255}, 12, 2)
+					}
+				}
+
+				canvas.AddCircleFilled(drawPos, 4, p.Color)
 
 				if draggingPoint.isDragging && draggingPoint.pairSetIndex == pairIndex && draggingPoint.pairIndex == i {
 					isCorrectPointToDrag := (isPrevImage && draggingPoint.isP1) || (!isPrevImage && !draggingPoint.isP1)
@@ -325,10 +341,11 @@ func imageWithPoints(imgPath string, pairIndex int, isPrevImage bool, scaledSize
 					originalX := int(float32(clickPos.X) / scaleX)
 					originalY := int(float32(clickPos.Y) / scaleY)
 					newPoint := image.Pt(originalX, originalY)
+					newColor := color.RGBA{R: uint8(rand.Intn(256)), G: uint8(rand.Intn(256)), B: uint8(rand.Intn(256)), A: 255}
 					if _, ok := points[pairIndex]; !ok {
 						points[pairIndex] = []PointPair{}
 					}
-					points[pairIndex] = append(points[pairIndex], PointPair{P1: newPoint, P2: newPoint})
+					points[pairIndex] = append(points[pairIndex], PointPair{P1: newPoint, P2: newPoint, Color: newColor})
 				}
 			} else if giu.IsMouseClicked(giu.MouseButtonRight) {
 				mousePos := giu.GetMousePos()
