@@ -1,0 +1,106 @@
+package warp
+
+import (
+	"fmt"
+	"image"
+	"image/draw"
+	"image/png"
+	"log"
+	"os"
+	"sync"
+
+	"github.com/fogleman/delaunay"
+)
+
+type WarpJob struct {
+	Images      []*image.NRGBA
+	ImagePoints [][]delaunay.Point
+}
+
+func saveImage(img image.Image, filename string) error {
+	file, err := os.Create(filename)
+	if err != nil {
+		return err
+	}
+	defer file.Close()
+
+	if err := png.Encode(file, img); err != nil {
+		return err
+	}
+	return nil
+}
+
+func (w *WarpJob) Run(filePrefix string, frameCount int) error {
+	if len(w.Images) < 2 {
+		return fmt.Errorf("need at least two images to warp")
+	}
+	if len(w.ImagePoints) != len(w.Images) {
+		return fmt.Errorf("need the same number of image points as images")
+	}
+	for i := 1; i < len(w.Images); i++ {
+		if w.Images[i].Bounds().Dx() != w.Images[0].Bounds().Dx() || w.Images[i].Bounds().Dy() != w.Images[0].Bounds().Dy() {
+			return fmt.Errorf("all images must be of the same size: image 0 is %v, image %d is %v", w.Images[0].Bounds(), i, w.Images[i].Bounds())
+		}
+	}
+	for i := 1; i < len(w.ImagePoints); i++ {
+		if len(w.ImagePoints[i]) != len(w.ImagePoints[0]) {
+			return fmt.Errorf("need the same number of points for all images. image0 has %d, image %d has %d", len(w.ImagePoints[0]), i, len(w.ImagePoints[i]))
+		}
+	}
+	bounds := w.Images[0].Bounds()
+	img0Points := []delaunay.Point{{0, 0}, {float64(bounds.Dx() - 1), 0},
+		{0, float64(bounds.Dy() - 1)}, {float64(bounds.Dx() - 1), float64(bounds.Dy() - 1)}}
+	img0Points = append(img0Points, w.ImagePoints[0]...)
+
+	triangulate, err := delaunay.Triangulate(img0Points)
+	if err != nil {
+		return fmt.Errorf("unable to triangulate image 1: %v", err)
+	}
+	log.Printf("triangulation: %v", triangulate.Triangles)
+	parallel := sync.WaitGroup{}
+
+	fileCount := 0
+	for imageIdx := 1; imageIdx < len(w.Images); imageIdx++ {
+		for count := 0; count < frameCount; count++ {
+			filename := fmt.Sprintf("%s-%05d.png", filePrefix, fileCount)
+			fileCount++
+
+			parallel.Go(func() {
+				alpha := float64(count) / float64(frameCount-1) // Range from 0.0 - 1.0
+
+				sourcePoints := make([]delaunay.Point, len(triangulate.Triangles))
+				destPoints := make([]delaunay.Point, len(triangulate.Triangles))
+
+				imgPoints := []delaunay.Point{{0, 0}, {float64(bounds.Dx() - 1), 0},
+					{0, float64(bounds.Dy() - 1)}, {float64(bounds.Dx() - 1), float64(bounds.Dy() - 1)}}
+				imgPoints = append(imgPoints, w.ImagePoints[imageIdx]...)
+
+				for i := range triangulate.Triangles {
+					sourcePoints[i] = img0Points[triangulate.Triangles[i]]
+					destPoints[i] = imgPoints[triangulate.Triangles[i]]
+				}
+
+				dst, err := WarpImage(w.Images[imageIdx], sourcePoints, destPoints)
+				if err != nil {
+					log.Fatalf("Cannot warp image: %s", err)
+				}
+
+				// Blend img1 with dst at alpha ratio
+				combined := image.NewNRGBA(dst.Bounds())
+				draw.Draw(combined, combined.Bounds(), w.Images[imageIdx-1], image.Point{0, 0}, draw.Src)
+				// Set the alpha on dst to alpha
+				alphaInt := uint8(255 * alpha)
+				for y := 0; y < dst.Bounds().Dy(); y++ {
+					for x := 0; x < dst.Bounds().Dx(); x++ {
+						dst.Pix[y*dst.Stride+x*4+3] = alphaInt
+					}
+				}
+				draw.Draw(combined, combined.Bounds(), dst, image.Point{0, 0}, draw.Over)
+				saveImage(combined, filename)
+				log.Printf("Finished %s", filename)
+			})
+		}
+		parallel.Wait()
+	}
+	return nil
+}
