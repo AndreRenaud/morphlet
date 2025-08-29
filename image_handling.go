@@ -50,7 +50,7 @@ func drawTriangle(img draw.Image, p1, p2, p3 image.Point, col color.Color) {
 	drawLine(img, p3.X, p3.Y, p1.X, p1.Y, col)
 }
 
-func loadImage(filename string) (*image.RGBA, error) {
+func loadImage(filename string) (*image.NRGBA, error) {
 	file, err := os.Open(filename)
 	if err != nil {
 		return nil, err
@@ -62,9 +62,9 @@ func loadImage(filename string) (*image.RGBA, error) {
 		return nil, err
 	}
 
-	rgbaImg, ok := img.(*image.RGBA)
+	rgbaImg, ok := img.(*image.NRGBA)
 	if !ok {
-		rgbaImg = image.NewRGBA(img.Bounds())
+		rgbaImg = image.NewNRGBA(img.Bounds())
 		draw.Draw(rgbaImg, rgbaImg.Bounds(), img, image.Point{}, draw.Src)
 	}
 
