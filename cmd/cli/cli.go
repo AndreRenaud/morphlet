@@ -4,12 +4,35 @@ import (
 	"flag"
 	"image"
 	"log"
+	"os"
 
 	"github.com/AndreRenaud/morphlet/warp"
 	"github.com/fogleman/delaunay"
 
+	"image/draw"
 	_ "image/jpeg"
 )
+
+func loadImage(filename string) (*image.NRGBA, error) {
+	file, err := os.Open(filename)
+	if err != nil {
+		return nil, err
+	}
+	defer file.Close()
+
+	img, _, err := image.Decode(file)
+	if err != nil {
+		return nil, err
+	}
+
+	rgbaImg, ok := img.(*image.NRGBA)
+	if !ok {
+		rgbaImg = image.NewNRGBA(img.Bounds())
+		draw.Draw(rgbaImg, rgbaImg.Bounds(), img, image.Point{}, draw.Src)
+	}
+
+	return rgbaImg, nil
+}
 
 func main() {
 	frameCount := flag.Int("frames", 21, "Number of frames to generate")
