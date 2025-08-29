@@ -5,7 +5,9 @@ import (
 	"fmt"
 	"image"
 	"log"
+	"sync"
 
+	"github.com/AndreRenaud/morphlet/warp"
 	"github.com/fogleman/delaunay"
 
 	"image/draw"
@@ -58,75 +60,41 @@ func main() {
 		log.Fatalf("Unable to triangulate image 1: %v", err)
 	}
 	log.Printf("img1 triangulation: %v", img1Triangulate.Triangles)
-	/*
-		img2Triangulate, err := delaunay.Triangulate(img2Points)
-		if err != nil {
-			log.Fatalf("Unable to triangulate image 1: %v", err)
-		}
-
-		log.Printf("img2 triangulation: %v", img2Triangulate.Triangles)
-	*/
+	parallel := sync.WaitGroup{}
 
 	for count := 0; count < *frameCount; count++ {
-		log.Printf("Doing count %d/%d", count, *frameCount)
-		alpha := float64(count) / float64(*frameCount-1) // Range from 0.0 - 1.0
+		filename := fmt.Sprintf("warped-%05d.png", count)
 
-		dst := image.NewNRGBA(img1.Bounds())
+		parallel.Go(func() {
+			alpha := float64(count) / float64(*frameCount-1) // Range from 0.0 - 1.0
 
-		for i := 0; i < len(img1Triangulate.Triangles); i += 3 {
-			s1 := img1Points[img1Triangulate.Triangles[i]]
-			s2 := img1Points[img1Triangulate.Triangles[i+1]]
-			s3 := img1Points[img1Triangulate.Triangles[i+2]]
-			//log.Printf("Triangle %d: (%.2f, %.2f), (%.2f, %.2f), (%.2f, %.2f)", i/3, p1.X, p1.Y, p2.X, p2.Y, p3.X, p3.Y)
+			sourcePoints := make([]delaunay.Point, len(img1Triangulate.Triangles))
+			destPoints := make([]delaunay.Point, len(img1Triangulate.Triangles))
 
-			//drawTriangle(img1, image.Point{X: int(s1.X), Y: int(s1.Y)}, image.Point{X: int(s2.X), Y: int(s2.Y)}, image.Point{X: int(s3.X), Y: int(s3.Y)}, color.RGBA{255, 0, 0, 255})
-
-			p1 := img2Points[img1Triangulate.Triangles[i]]
-			p2 := img2Points[img1Triangulate.Triangles[i+1]]
-			p3 := img2Points[img1Triangulate.Triangles[i+2]]
-			//drawTriangle(img2, image.Point{X: int(p1.X), Y: int(p1.Y)}, image.Point{X: int(p2.X), Y: int(p2.Y)}, image.Point{X: int(p3.X), Y: int(p3.Y)}, color.RGBA{0, 0, 255, 255})
-
-			WarpTriangle(img2, dst, [3]delaunay.Point{p1, p2, p3}, [3]delaunay.Point{s1, s2, s3})
-		}
-
-		// Blend img1 with dst at alpha ratio
-		combined := image.NewNRGBA(dst.Bounds())
-		draw.Draw(combined, combined.Bounds(), img1, image.Point{0, 0}, draw.Src)
-		// Set the alpha on dst to alpha
-		alphaInt := uint8(255 * alpha)
-		for y := 0; y < dst.Bounds().Dy(); y++ {
-			for x := 0; x < dst.Bounds().Dx(); x++ {
-				dst.Pix[y*dst.Stride+x*4+3] = alphaInt
+			for i := range img1Triangulate.Triangles {
+				sourcePoints[i] = img1Points[img1Triangulate.Triangles[i]]
+				destPoints[i] = img2Points[img1Triangulate.Triangles[i]]
 			}
-		}
-		draw.Draw(combined, combined.Bounds(), dst, image.Point{0, 0}, draw.Over)
 
-		/*
-			for y := 0; y < combined.Bounds().Dy(); y++ {
-				for x := 0; x < combined.Bounds().Dx(); x++ {
-					c1 := img1.At(x, y).(color.NRGBA)
-					c2 := dst.At(x, y).(color.NRGBA)
-					combined.Set(x, y, color.NRGBA{
-						R: uint8(float64(c1.R)*(1-alpha) + float64(c2.R)*alpha),
-						G: uint8(float64(c1.G)*(1-alpha) + float64(c2.G)*alpha),
-						B: uint8(float64(c1.B)*(1-alpha) + float64(c2.B)*alpha),
-						A: 255,
-					})
+			dst, err := warp.WarpImage(img2, sourcePoints, destPoints)
+			if err != nil {
+				log.Fatalf("Cannot warp image: %s", err)
+			}
+
+			// Blend img1 with dst at alpha ratio
+			combined := image.NewNRGBA(dst.Bounds())
+			draw.Draw(combined, combined.Bounds(), img1, image.Point{0, 0}, draw.Src)
+			// Set the alpha on dst to alpha
+			alphaInt := uint8(255 * alpha)
+			for y := 0; y < dst.Bounds().Dy(); y++ {
+				for x := 0; x < dst.Bounds().Dx(); x++ {
+					dst.Pix[y*dst.Stride+x*4+3] = alphaInt
 				}
 			}
-		*/
-
-		saveImage(combined, fmt.Sprintf("warped-%05d.png", count))
+			draw.Draw(combined, combined.Bounds(), dst, image.Point{0, 0}, draw.Over)
+			saveImage(combined, filename)
+			log.Printf("Finished %s", filename)
+		})
 	}
-
-	/*
-		for i := 0; i < len(img2Triangulate.Triangles); i += 3 {
-			p1 := img2Points[img2Triangulate.Triangles[i]]
-			p2 := img2Points[img2Triangulate.Triangles[i+1]]
-			p3 := img2Points[img2Triangulate.Triangles[i+2]]
-			log.Printf("Triangle %d: (%.2f, %.2f), (%.2f, %.2f), (%.2f, %.2f)", i/3, p1.X, p1.Y, p2.X, p2.Y, p3.X, p3.Y)
-
-			drawTriangle(img2, image.Point{X: int(p1.X), Y: int(p1.Y)}, image.Point{X: int(p2.X), Y: int(p2.Y)}, image.Point{X: int(p3.X), Y: int(p3.Y)}, color.NRGBA{0, 0, 255, 255})
-		}
-	*/
+	parallel.Wait()
 }

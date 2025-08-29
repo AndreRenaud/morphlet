@@ -1,6 +1,6 @@
 module github.com/AndreRenaud/morphlet
 
-go 1.24.3
+go 1.25.0
 
 require (
 	github.com/AllenDang/giu v0.14.1
