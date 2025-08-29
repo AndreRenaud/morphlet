@@ -7,6 +7,7 @@ import (
 	"image/color"
 	"image/draw"
 	"os"
+	"time"
 
 	_ "image/jpeg"
 	_ "image/png"
@@ -33,6 +34,8 @@ var (
 		pointIndex   int
 		dragStartPos image.Point
 	}
+	lastClickTime float64
+	lastClickPos  image.Point
 )
 
 func onNewProject() {
@@ -252,20 +255,41 @@ func loadImage(path string) (*giu.Texture, image.Point, error) {
 	return tex, size, nil
 }
 
-func addPointPair(image0Point, image1Point image.Point) {
-	if currentJob == nil || selectedImage <= 0 {
+func addPointToAllImages(clickedPoint image.Point, clickedImageIndex int) {
+	if currentJob == nil {
 		return
 	}
 
-	// Ensure we have enough space in ImagePoints
-	pairIndex := selectedImage - 1 // Use selectedImage-1 as the pair index
-	for len(currentJob.ImagePoints) <= pairIndex {
+	// Ensure we have enough images and space in ImagePoints
+	numImages := len(currentJob.Images)
+	if numImages == 0 {
+		return
+	}
+
+	// Ensure ImagePoints has enough entries for all images
+	for len(currentJob.ImagePoints) < numImages {
 		currentJob.ImagePoints = append(currentJob.ImagePoints, [][]int{})
 	}
 
-	// Add the point pair [x0, y0, x1, y1] where 0 is first image, 1 is second image
-	pointPair := []int{image0Point.X, image0Point.Y, image1Point.X, image1Point.Y}
-	currentJob.ImagePoints[pairIndex] = append(currentJob.ImagePoints[pairIndex], pointPair)
+	// Add a new point to each image at the same relative position
+	for i := 0; i < numImages; i++ {
+		var pointX, pointY int
+		if i == clickedImageIndex {
+			// Use the exact clicked position for the clicked image
+			pointX = clickedPoint.X
+			pointY = clickedPoint.Y
+		} else {
+			// For other images, use the same coordinates
+			// In a more sophisticated implementation, you might want to transform
+			// coordinates based on image differences, but for now use the same coords
+			pointX = clickedPoint.X
+			pointY = clickedPoint.Y
+		}
+
+		// Add the point as [x, y] to this image
+		newPoint := []int{pointX, pointY}
+		currentJob.ImagePoints[i] = append(currentJob.ImagePoints[i], newPoint)
+	}
 }
 
 func clickableImage(tex *giu.Texture, scaledSize image.Point, originalSize image.Point, imageIndex int) giu.Widget {
@@ -287,29 +311,69 @@ func clickableImage(tex *giu.Texture, scaledSize image.Point, originalSize image
 			clickPos := mousePos.Sub(startPos)
 
 			if giu.IsMouseClicked(giu.MouseButtonLeft) {
-				// Check if clicking near an existing point
-				if currentJob != nil && len(currentJob.ImagePoints) > imageIndex {
-					for pointIdx, pointPair := range currentJob.ImagePoints[imageIndex] {
-						if len(pointPair) >= 2 {
-							pointOnImage := image.Pt(pointPair[0], pointPair[1])
-							displayX := int(float32(pointOnImage.X) * scaleX)
-							displayY := int(float32(pointOnImage.Y) * scaleY)
-							displayPoint := image.Pt(displayX, displayY)
+				currentTime := time.Now().UnixNano() / int64(time.Millisecond)
 
-							// Check if click is within 10 pixels of the point
-							dx := clickPos.X - displayPoint.X
-							dy := clickPos.Y - displayPoint.Y
-							distSq := dx*dx + dy*dy
-							if distSq <= 10*10 {
-								// Start dragging this point
-								draggingPoint.isDragging = true
-								draggingPoint.imageIndex = imageIndex
-								draggingPoint.pointIndex = pointIdx
-								draggingPoint.dragStartPos = clickPos
-								break
+				// Check for double-click (within 500ms and 5 pixels)
+				timeDiff := float64(currentTime) - lastClickTime
+				dx := clickPos.X - lastClickPos.X
+				dy := clickPos.Y - lastClickPos.Y
+				distSq := dx*dx + dy*dy
+
+				if timeDiff < 500 && distSq <= 5*5 {
+					// Double-click detected - add new point to all images
+					// Convert to original image coordinates
+					originalX := int(float32(clickPos.X) / scaleX)
+					originalY := int(float32(clickPos.Y) / scaleY)
+
+					// Clamp to image bounds
+					if originalX < 0 {
+						originalX = 0
+					}
+					if originalX >= originalSize.X {
+						originalX = originalSize.X - 1
+					}
+					if originalY < 0 {
+						originalY = 0
+					}
+					if originalY >= originalSize.Y {
+						originalY = originalSize.Y - 1
+					}
+
+					clickedPoint := image.Pt(originalX, originalY)
+					addPointToAllImages(clickedPoint, imageIndex)
+
+					// Reset click tracking to prevent triple-click issues
+					lastClickTime = 0
+					lastClickPos = image.Pt(0, 0)
+				} else {
+					// Single click - check if clicking near an existing point for dragging
+					if currentJob != nil && len(currentJob.ImagePoints) > imageIndex {
+						for pointIdx, pointPair := range currentJob.ImagePoints[imageIndex] {
+							if len(pointPair) >= 2 {
+								pointOnImage := image.Pt(pointPair[0], pointPair[1])
+								displayX := int(float32(pointOnImage.X) * scaleX)
+								displayY := int(float32(pointOnImage.Y) * scaleY)
+								displayPoint := image.Pt(displayX, displayY)
+
+								// Check if click is within 10 pixels of the point
+								dx := clickPos.X - displayPoint.X
+								dy := clickPos.Y - displayPoint.Y
+								distSq := dx*dx + dy*dy
+								if distSq <= 10*10 {
+									// Start dragging this point
+									draggingPoint.isDragging = true
+									draggingPoint.imageIndex = imageIndex
+									draggingPoint.pointIndex = pointIdx
+									draggingPoint.dragStartPos = clickPos
+									break
+								}
 							}
 						}
 					}
+
+					// Update click tracking for double-click detection
+					lastClickTime = float64(currentTime)
+					lastClickPos = clickPos
 				}
 			}
 		}
