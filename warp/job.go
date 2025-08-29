@@ -113,6 +113,19 @@ func (w *WarpJob) Run(filePrefix string, frameCount int) error {
 	return nil
 }
 
+func LoadWarpJson(filename string) (*WarpJobSaveFormat, error) {
+	var saved WarpJobSaveFormat
+	jsonData, err := os.ReadFile(filename)
+	if err != nil {
+		return nil, err
+	}
+	if err := json.Unmarshal(jsonData, &saved); err != nil {
+		return nil, err
+	}
+	log.Printf("Loaded warp job: %+v", saved)
+	return &saved, nil
+}
+
 func NewJobFromFile(filename string) (*WarpJob, error) {
 	data, err := os.ReadFile(filename)
 	if err != nil {

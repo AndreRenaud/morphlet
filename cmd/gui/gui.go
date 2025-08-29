@@ -1,8 +1,10 @@
 package main
 
 import (
+	"flag"
 	"fmt"
 	"image"
+	"image/color"
 	"image/draw"
 	"os"
 
@@ -25,7 +27,6 @@ var (
 	splitSize       float32 = 250
 	newImagePath    string
 	textures        = make(map[string]*TextureWithSize)
-	pendingPoint    *image.Point // Store a point from image 0 waiting to be paired
 )
 
 func onNewProject() {
@@ -34,7 +35,6 @@ func onNewProject() {
 		Images:      []string{},
 		ImagePoints: [][][]int{},
 	}
-	pendingPoint = nil // Clear any pending point
 }
 
 func onOpenProject() {
@@ -79,7 +79,6 @@ func imagePane() giu.Widget {
 		localI := i
 		imageWidgets[i] = giu.Selectable(imgLabel).Selected(selectedImage == localI).OnClick(func() {
 			selectedImage = localI
-			pendingPoint = nil // Clear pending point when switching images
 		})
 	}
 
@@ -103,7 +102,6 @@ func imagePane() giu.Widget {
 					if selectedImage >= len(currentJob.Images) {
 						selectedImage = len(currentJob.Images) - 1
 					}
-					pendingPoint = nil // Clear pending point
 				}
 			}),
 		),
@@ -146,13 +144,6 @@ func comparisonPane() giu.Widget {
 				// Non-zero image selected - show image 0 beside selected image
 				layouts = append(layouts, giu.Label(fmt.Sprintf("Comparing image 0 with image %d", selectedImage)))
 
-				// Show pending point status
-				if pendingPoint != nil {
-					layouts = append(layouts, giu.Label(fmt.Sprintf("Pending point on image 0: (%d, %d) - Click on image %d to pair", pendingPoint.X, pendingPoint.Y, selectedImage)))
-				} else {
-					layouts = append(layouts, giu.Label("Click on image 0 first, then on the corresponding point on the other image"))
-				}
-
 				tex0, size0, err0 := loadImage(currentJob.Images[0])
 				texSelected, sizeSelected, errSelected := loadImage(currentJob.Images[selectedImage])
 
@@ -173,11 +164,11 @@ func comparisonPane() giu.Widget {
 					layouts = append(layouts, giu.Row(
 						giu.Column(
 							giu.Label("Image 0"),
-							clickableImage(tex0, scaledSize0, size0, true),
+							clickableImage(tex0, scaledSize0, size0, 0),
 						),
 						giu.Column(
 							giu.Label(fmt.Sprintf("Image %d", selectedImage)),
-							clickableImage(texSelected, scaledSizeSelected, sizeSelected, false),
+							clickableImage(texSelected, scaledSizeSelected, sizeSelected, selectedImage),
 						),
 					))
 				}
@@ -271,43 +262,46 @@ func addPointPair(image0Point, image1Point image.Point) {
 	currentJob.ImagePoints[pairIndex] = append(currentJob.ImagePoints[pairIndex], pointPair)
 }
 
-func clickableImage(tex *giu.Texture, scaledSize image.Point, originalSize image.Point, isImage0 bool) giu.Widget {
+func clickableImage(tex *giu.Texture, scaledSize image.Point, originalSize image.Point, imageIndex int) giu.Widget {
 	return giu.Custom(func() {
 		startPos := giu.GetCursorScreenPos()
 		imgWidget := giu.Image(tex).Size(float32(scaledSize.X), float32(scaledSize.Y))
 		imgWidget.Build()
 
-		// Handle mouse clicks on the image
-		if giu.IsItemHovered() && giu.IsMouseClicked(giu.MouseButtonLeft) {
-			mousePos := giu.GetMousePos()
-			clickPos := mousePos.Sub(startPos)
+		// Get canvas for drawing points
+		canvas := giu.GetCanvas()
 
-			// Convert click position to original image coordinates
-			scaleX := float32(originalSize.X) / float32(scaledSize.X)
-			scaleY := float32(originalSize.Y) / float32(scaledSize.Y)
-			originalX := int(float32(clickPos.X) * scaleX)
-			originalY := int(float32(clickPos.Y) * scaleY)
+		// Calculate scale factors for converting original coordinates to display coordinates
+		scaleX := float32(scaledSize.X) / float32(originalSize.X)
+		scaleY := float32(scaledSize.Y) / float32(originalSize.Y)
 
-			// Only add points when we have two images being compared
-			if selectedImage > 0 {
-				if isImage0 {
-					// Store the click on image 0 as pending
-					point := image.Pt(originalX, originalY)
-					pendingPoint = &point
-				} else {
-					// This is a click on the selected image (image 1)
-					if pendingPoint != nil {
-						// We have a pending point, create the pair
-						addPointPair(*pendingPoint, image.Pt(originalX, originalY))
-						pendingPoint = nil // Clear the pending point
-					} else {
-						// No pending point, just store this as pending
-						point := image.Pt(originalX, originalY)
-						pendingPoint = &point
-					}
+		// Draw existing points
+		if currentJob != nil {
+			for i, pointPair := range currentJob.ImagePoints[imageIndex] {
+				var pointOnImage image.Point
+				pointOnImage = image.Pt(pointPair[0], pointPair[1])
+
+				// Convert to display coordinates
+				displayX := int(float32(pointOnImage.X) * scaleX)
+				displayY := int(float32(pointOnImage.Y) * scaleY)
+				drawPos := startPos.Add(image.Pt(displayX, displayY))
+
+				// Draw the point with a unique color for each pair
+				colors := []color.RGBA{
+					{R: 255, G: 0, B: 0, A: 255},   // Red
+					{R: 0, G: 255, B: 0, A: 255},   // Green
+					{R: 0, G: 0, B: 255, A: 255},   // Blue
+					{R: 255, G: 255, B: 0, A: 255}, // Yellow
+					{R: 255, G: 0, B: 255, A: 255}, // Magenta
+					{R: 0, G: 255, B: 255, A: 255}, // Cyan
 				}
+				pointColor := colors[i%len(colors)]
+
+				canvas.AddCircleFilled(drawPos, 4, pointColor)
+				canvas.AddCircle(drawPos, 6, color.RGBA{R: 255, G: 255, B: 255, A: 255}, 12, 1)
 			}
 		}
+
 	})
 }
 
@@ -316,6 +310,26 @@ func simpleImage(tex *giu.Texture, scaledSize image.Point) giu.Widget {
 }
 
 func main() {
+	// Parse command line arguments
+	jobFile := flag.String("job", "", "Load project from JSON file")
+	flag.Parse()
+
+	// Load job file if specified
+	if *jobFile != "" {
+		loadedJob, err := warp.LoadWarpJson(*jobFile)
+		if err != nil {
+			fmt.Printf("Error loading job file '%s': %v\n", *jobFile, err)
+			os.Exit(1)
+		}
+		// Initialize the project with the loaded job
+		currentJob = loadedJob
+		showProjectView = true
+		// If there are images, select the first one by default
+		if len(currentJob.Images) > 0 {
+			selectedImage = 0
+		}
+	}
+
 	wnd := giu.NewMasterWindow("MorphLet", 1024, 768, 0)
 	wnd.SetStyle(Theme())
 	wnd.Run(loop)
