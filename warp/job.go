@@ -126,6 +126,20 @@ func LoadWarpJson(filename string) (*WarpJobSaveFormat, error) {
 	return &saved, nil
 }
 
+func SaveWarpJson(job *WarpJobSaveFormat, filename string) error {
+	jsonData, err := json.MarshalIndent(job, "", "  ")
+	if err != nil {
+		return fmt.Errorf("failed to marshal job data: %w", err)
+	}
+
+	if err := os.WriteFile(filename, jsonData, 0644); err != nil {
+		return fmt.Errorf("failed to write file: %w", err)
+	}
+
+	log.Printf("Saved warp job to: %s", filename)
+	return nil
+}
+
 func NewJobFromFile(filename string) (*WarpJob, error) {
 	data, err := os.ReadFile(filename)
 	if err != nil {

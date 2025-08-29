@@ -36,6 +36,7 @@ var (
 	}
 	lastClickTime float64
 	lastClickPos  image.Point
+	saveFilePath  string
 )
 
 func onNewProject() {
@@ -63,6 +64,7 @@ func startUI() {
 		giu.Label("Welcome to MorphLet"),
 		giu.Button("New Project").OnClick(onNewProject),
 		giu.Button("Open Project").OnClick(onOpenProject),
+		giu.PrepareMsgbox(),
 	)
 }
 
@@ -72,6 +74,7 @@ func projectUI() {
 			imagePane(),
 			comparisonPane(),
 		),
+		giu.PrepareMsgbox(),
 	)
 }
 
@@ -186,18 +189,36 @@ func comparisonPane() giu.Widget {
 
 		giu.Layout{
 			giu.Label("Image Comparison"),
-			giu.Button("Generate Morph").OnClick(func() {
-				if currentJob != nil && selectedImage > 0 {
-					pairIndex := selectedImage - 1
-					if len(currentJob.ImagePoints) > pairIndex && len(currentJob.ImagePoints[pairIndex]) > 0 {
-						giu.Msgbox("Info", fmt.Sprintf("Would morph with %d point pairs", len(currentJob.ImagePoints[pairIndex])))
+			giu.Row(
+				giu.Button("Generate Morph").OnClick(func() {
+					if currentJob != nil && selectedImage > 0 {
+						pairIndex := selectedImage - 1
+						if len(currentJob.ImagePoints) > pairIndex && len(currentJob.ImagePoints[pairIndex]) > 0 {
+							giu.Msgbox("Info", fmt.Sprintf("Would morph with %d point pairs", len(currentJob.ImagePoints[pairIndex])))
+						} else {
+							giu.Msgbox("Info", "No point pairs available for morphing")
+						}
 					} else {
-						giu.Msgbox("Info", "No point pairs available for morphing")
+						giu.Msgbox("Info", "Select a non-zero image to enable morphing")
 					}
-				} else {
-					giu.Msgbox("Info", "Select a non-zero image to enable morphing")
-				}
-			}),
+				}),
+				giu.Button("Save Project").OnClick(func() {
+					if currentJob != nil {
+						if saveFilePath == "" {
+							saveFilePath = "project.json"
+						}
+						err := warp.SaveWarpJson(currentJob, saveFilePath)
+						if err != nil {
+							giu.Msgbox("Error", fmt.Sprintf("Failed to save project: %v", err))
+						} else {
+							giu.Msgbox("Success", fmt.Sprintf("Project saved to: %s", saveFilePath))
+						}
+					} else {
+						giu.Msgbox("Error", "No project to save")
+					}
+				}),
+			),
+			giu.InputText(&saveFilePath).Hint("project.json").Label("Save as:"),
 			giu.Column(layouts...),
 		}.Build()
 	})
