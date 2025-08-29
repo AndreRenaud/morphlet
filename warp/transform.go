@@ -4,7 +4,6 @@ import (
 	"fmt"
 	"image"
 	"image/color"
-	"image/draw"
 	"math"
 
 	"github.com/fogleman/delaunay"
@@ -32,15 +31,8 @@ func inv2x2(M [2][2]float64) (Minv [2][2]float64, ok bool) {
 	return Minv, true
 }
 
-// Convert any image.Image to *image.RGBA once for fast random access.
-func toRGBA(src image.Image) *image.RGBA {
-	rgba := image.NewRGBA(src.Bounds())
-	draw.Draw(rgba, rgba.Bounds(), src, src.Bounds().Min, draw.Src)
-	return rgba
-}
-
-// Bilinear sampling from *image.RGBA at floating point (x,y).
-func sampleBilinear(rgba *image.RGBA, x, y float64) color.RGBA {
+// Bilinear sampling from *image.NRGBA at floating point (x,y).
+func sampleBilinear(rgba *image.NRGBA, x, y float64) color.NRGBA {
 	b := rgba.Bounds()
 	if x < float64(b.Min.X) {
 		x = float64(b.Min.X)
@@ -69,10 +61,10 @@ func sampleBilinear(rgba *image.RGBA, x, y float64) color.RGBA {
 	fx := x - float64(x0)
 	fy := y - float64(y0)
 
-	c00 := rgba.RGBAAt(x0, y0)
-	c10 := rgba.RGBAAt(x1, y0)
-	c01 := rgba.RGBAAt(x0, y1)
-	c11 := rgba.RGBAAt(x1, y1)
+	c00 := rgba.NRGBAAt(x0, y0)
+	c10 := rgba.NRGBAAt(x1, y0)
+	c01 := rgba.NRGBAAt(x0, y1)
+	c11 := rgba.NRGBAAt(x1, y1)
 
 	lerp := func(a, b float64, t float64) float64 { return a + (b-a)*t }
 
@@ -107,14 +99,12 @@ func sampleBilinear(rgba *image.RGBA, x, y float64) color.RGBA {
 	B := uint8(math.Round(lerp(b0, b1, fy)))
 	A := uint8(math.Round(lerp(a0, a1, fy)))
 
-	return color.RGBA{R, G, B, A}
+	return color.NRGBA{R, G, B, A}
 }
 
 // WarpTriangle maps src triangle S -> dst triangle D by filling into dst image.
 // srcImg may be any image.Image; dst must be draw.Image (e.g. *image.RGBA).
-func WarpTriangle(srcImg image.Image, dst draw.Image, S [3]delaunay.Point, D [3]delaunay.Point) error {
-	src := toRGBA(srcImg) // one-time conversion for speed
-
+func WarpTriangle(src *image.NRGBA, dst *image.NRGBA, S [3]delaunay.Point, D [3]delaunay.Point) error {
 	// Build edge matrices: P = [S1-S0 | S2-S0], Q = [D1-D0 | D2-D0]
 	P := [2][2]float64{
 		{S[1].X - S[0].X, S[2].X - S[0].X},
@@ -172,14 +162,14 @@ func WarpTriangle(srcImg image.Image, dst draw.Image, S [3]delaunay.Point, D [3]
 				s := add(S[0], srcRel)
 
 				c := sampleBilinear(src, s.X, s.Y)
-				dst.Set(x, y, c)
+				dst.SetNRGBA(x, y, c)
 			}
 		}
 	}
 	return nil
 }
 
-func WarpImage(srcImg image.Image, sourcePoints, destPoints []delaunay.Point) (*image.NRGBA, error) {
+func WarpImage(srcImg *image.NRGBA, sourcePoints, destPoints []delaunay.Point) (*image.NRGBA, error) {
 	if len(sourcePoints) != len(destPoints) {
 		return nil, fmt.Errorf("source and destination point lists must have the same length")
 	}
