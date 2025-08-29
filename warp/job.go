@@ -9,6 +9,7 @@ import (
 	"os"
 	"runtime"
 	"sync"
+	"sync/atomic"
 
 	"github.com/fogleman/delaunay"
 )
@@ -17,6 +18,7 @@ type WarpJob struct {
 	Images      []*image.NRGBA
 	ImagePoints [][]delaunay.Point
 	ThreadCount int // Number of concurrent threads to use. If set to 0, uses auto detected CPU count
+	Callback    func(completed int, total int)
 }
 
 type WarpJobSaveFormat struct {
@@ -50,7 +52,6 @@ func (w *WarpJob) Run(filePrefix string, frameCount int) error {
 	if err != nil {
 		return fmt.Errorf("unable to triangulate image 1: %v", err)
 	}
-	log.Printf("triangulation: %v", triangulate.Triangles)
 
 	fileCount := 0
 	prevImage := w.Images[0]
@@ -58,6 +59,8 @@ func (w *WarpJob) Run(filePrefix string, frameCount int) error {
 		w.ThreadCount = runtime.NumCPU()
 	}
 	jobCount := make(chan struct{}, w.ThreadCount)
+	total := frameCount * (len(w.Images) - 1)
+	var completed atomic.Int64
 	for imageIdx := 1; imageIdx < len(w.Images); imageIdx++ {
 
 		parallel := sync.WaitGroup{}
@@ -99,7 +102,10 @@ func (w *WarpJob) Run(filePrefix string, frameCount int) error {
 				}
 				draw.Draw(combined, combined.Bounds(), dst, image.Point{0, 0}, draw.Over)
 				SaveImage(combined, filename)
-				log.Printf("Finished %s", filename)
+				completed.Add(1)
+				if w.Callback != nil {
+					w.Callback(int(completed.Load()), total)
+				}
 
 				if count == frameCount-1 {
 					prevImageCandidate = dst

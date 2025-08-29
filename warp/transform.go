@@ -179,19 +179,6 @@ func WarpImage(srcImg *image.NRGBA, sourcePoints, destPoints []delaunay.Point) (
 	dstImg := image.NewNRGBA(srcImg.Bounds())
 
 	for i := 0; i < len(sourcePoints); i += 3 {
-		//for i := 0; i < len(img1Triangulate.Triangles); i += 3 {
-		//s1 := img1Points[img1Triangulate.Triangles[i]]
-		//s2 := img1Points[img1Triangulate.Triangles[i+1]]
-		//s3 := img1Points[img1Triangulate.Triangles[i+2]]
-		//log.Printf("Triangle %d: (%.2f, %.2f), (%.2f, %.2f), (%.2f, %.2f)", i/3, p1.X, p1.Y, p2.X, p2.Y, p3.X, p3.Y)
-
-		//drawTriangle(img1, image.Point{X: int(s1.X), Y: int(s1.Y)}, image.Point{X: int(s2.X), Y: int(s2.Y)}, image.Point{X: int(s3.X), Y: int(s3.Y)}, color.RGBA{255, 0, 0, 255})
-
-		//p1 := img2Points[img1Triangulate.Triangles[i]]
-		//p2 := img2Points[img1Triangulate.Triangles[i+1]]
-		//p3 := img2Points[img1Triangulate.Triangles[i+2]]
-		//drawTriangle(img2, image.Point{X: int(p1.X), Y: int(p1.Y)}, image.Point{X: int(p2.X), Y: int(p2.Y)}, image.Point{X: int(p3.X), Y: int(p3.Y)}, color.RGBA{0, 0, 255, 255})
-
 		source := [3]delaunay.Point{sourcePoints[i], sourcePoints[i+1], sourcePoints[i+2]}
 		dest := [3]delaunay.Point{destPoints[i], destPoints[i+1], destPoints[i+2]}
 
