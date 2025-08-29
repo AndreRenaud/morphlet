@@ -92,10 +92,6 @@ func imagePane() giu.Widget {
 
 		// Create a row with selectable image name and up/down buttons on the right
 		imageWidgets[i] = giu.Row(
-			giu.Selectable(imgLabel).Selected(selectedImage == localI).OnClick(func() {
-				selectedImage = localI
-			}), // Let the selectable take available space
-			giu.Dummy(1, 0), // Spacer to push buttons to the right
 			giu.Button("↑").Size(25, 0).OnClick(func() {
 				// Move image up (swap with previous)
 				if localI > 0 && currentJob != nil {
@@ -134,6 +130,9 @@ func imagePane() giu.Widget {
 					}
 				}
 			}).Disabled(localI == len(currentJob.Images)-1), // Disable down button for last item
+			giu.Selectable(imgLabel).Selected(selectedImage == localI).OnClick(func() {
+				selectedImage = localI
+			}), // Let the selectable take available space
 		)
 	}
 
