@@ -144,8 +144,19 @@ func imagePane() giu.Widget {
 			giu.Button("Add Image").OnClick(func() {
 				if newImagePath != "" {
 					currentJob.Images = append(currentJob.Images, newImagePath)
-					// Initialize empty point list for new image
-					currentJob.ImagePoints = append(currentJob.ImagePoints, [][]int{})
+
+					// Copy points from image 0 if it exists, otherwise create empty point list
+					var newImagePoints [][]int
+					if len(currentJob.ImagePoints) > 0 && len(currentJob.ImagePoints[0]) > 0 {
+						// Deep copy the points from image 0
+						for _, point := range currentJob.ImagePoints[0] {
+							// Create a copy of each point [x, y]
+							newPoint := make([]int, len(point))
+							copy(newPoint, point)
+							newImagePoints = append(newImagePoints, newPoint)
+						}
+					}
+					currentJob.ImagePoints = append(currentJob.ImagePoints, newImagePoints)
 					newImagePath = ""
 				}
 			}),
