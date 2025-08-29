@@ -1,388 +1,166 @@
 package main
 
 import (
-	"fmt"
 	"image"
 	"image/color"
 	"image/draw"
+	"image/png"
 	"log"
-	"math/rand"
 	"os"
-	"time"
+
+	"github.com/fogleman/delaunay"
 
 	_ "image/jpeg"
-	_ "image/png"
-
-	"github.com/AllenDang/giu"
 )
 
-type PointPair struct {
-	P1, P2 image.Point
-	Color  color.RGBA
-}
-
-type TextureWithSize struct {
-	Texture *giu.Texture
-	Size    image.Point
-}
-
-var (
-	showProjectView bool
-	images          []string
-	selectedImage           = -1
-	splitSize       float32 = 250
-	newImagePath    string
-	points          = make(map[int][]PointPair) // key: selectedImage index
-	textures        = make(map[string]*TextureWithSize)
-	draggingPoint   struct {
-		pairSetIndex int  // Corresponds to `pairIndex` in imageWithPoints, which is `selectedImage`
-		pairIndex    int  // Index in the `points[pairSetIndex]` slice
-		isP1         bool // true if dragging P1, false for P2
-		isDragging   bool
+// drawLine implements Bresenhams line drawing algorithm
+func drawLine(img draw.Image, x1, y1, x2, y2 int, col color.Color) {
+	dx := x2 - x1
+	if dx < 0 {
+		dx = -dx
 	}
-)
-
-func onNewProject() {
-	showProjectView = true
-	images = []string{}
-	selectedImage = -1
-	points = make(map[int][]PointPair)
-	textures = make(map[string]*TextureWithSize)
-}
-
-func onOpenProject() {
-	onNewProject()
-}
-
-func loop() {
-	if showProjectView {
-		projectUI()
-	} else {
-		startUI()
+	dy := y2 - y1
+	if dy < 0 {
+		dy = -dy
 	}
-}
-
-func startUI() {
-	giu.SingleWindow().Layout(
-		giu.Style().SetFontSize(24),
-		giu.Layout{
-			giu.Label("MorphLet"),
-		},
-		giu.Style().SetFontSize(16),
-		giu.Layout{
-			giu.Button("Start New Project").OnClick(onNewProject),
-			giu.Button("Open Project").OnClick(onOpenProject),
-		},
-	)
-}
-
-func projectUI() {
-	giu.SingleWindow().Layout(
-		giu.SplitLayout(giu.DirectionHorizontal, &splitSize,
-			imagePane(),
-			comparisonPane(),
-		),
-	)
-}
-
-func imagePane() giu.Widget {
-	imageWidgets := make([]giu.Widget, len(images))
-	for i := range images {
-		imgLabel := fmt.Sprintf("%d: %s", i+1, images[i])
-		localI := i
-		imageWidgets[i] = giu.Selectable(imgLabel).Selected(selectedImage == localI).OnClick(func() {
-			selectedImage = localI
-		})
+	sx := 1
+	if x1 >= x2 {
+		sx = -1
 	}
-
-	return giu.Layout{
-		giu.Label("Images"),
-		giu.InputText(&newImagePath).Hint("path/to/image.png"),
-		giu.Row(
-			giu.Button("Add Image").OnClick(func() {
-				if newImagePath != "" {
-					images = append(images, newImagePath)
-					newImagePath = ""
-				}
-			}),
-			giu.Button("Remove Image").OnClick(func() {
-				if selectedImage >= 0 && selectedImage < len(images) {
-					delete(points, selectedImage)
-					delete(points, selectedImage+1)
-
-					images = append(images[:selectedImage], images[selectedImage+1:]...)
-					if selectedImage >= len(images) {
-						selectedImage = len(images) - 1
-					}
-				}
-			}),
-		),
-		giu.Column(imageWidgets...),
+	sy := 1
+	if y1 >= y2 {
+		sy = -1
 	}
-}
-
-func comparisonPane() giu.Widget {
-	return giu.Custom(func() {
-		var layouts []giu.Widget
-		availW, availH := giu.GetAvailableRegion()
-
-		if selectedImage == -1 {
-			layouts = append(layouts, giu.Label("Please select an image from the list."))
-		} else if len(images) > 0 {
-			if selectedImage == 0 && len(images) == 1 {
-				layouts = append(layouts, giu.Label("This is the only image."))
-				_, size, err := loadImage(images[selectedImage])
-				if err != nil {
-					layouts = append(layouts, giu.Label(err.Error()))
-				} else {
-					scaledSize := getScaledSize(size, image.Pt(int(availW), int(availH)))
-					layouts = append(layouts, giu.Row(imageWithPoints(images[selectedImage], selectedImage, true, scaledSize)))
-				}
-			} else if selectedImage == 0 && len(images) > 1 {
-				layouts = append(layouts, giu.Label("This is the first image. Compare with next ->"))
-				_, size, err := loadImage(images[selectedImage])
-				if err != nil {
-					layouts = append(layouts, giu.Label(err.Error()))
-				} else {
-					scaledSize := getScaledSize(size, image.Pt(int(availW), int(availH)))
-					layouts = append(layouts, giu.Row(imageWithPoints(images[selectedImage], selectedImage+1, true, scaledSize)))
-				}
-			} else { // selectedImage > 0
-				prevImgPath := images[selectedImage-1]
-				currImgPath := images[selectedImage]
-
-				_, prevSize, errPrev := loadImage(prevImgPath)
-				_, currSize, errCurr := loadImage(currImgPath)
-
-				if errPrev != nil {
-					layouts = append(layouts, giu.Label(fmt.Sprintf("Failed to load previous image: %v", errPrev)))
-				}
-				if errCurr != nil {
-					layouts = append(layouts, giu.Label(fmt.Sprintf("Failed to load current image: %v", errCurr)))
-				}
-
-				if errPrev == nil && errCurr == nil {
-					targetWidth := availW / 2
-					prevScaledSize := getScaledSize(prevSize, image.Pt(int(targetWidth), int(availH)))
-					currScaledSize := getScaledSize(currSize, image.Pt(int(targetWidth), int(availH)))
-
-					layouts = append(layouts, giu.Row(
-						imageWithPoints(prevImgPath, selectedImage, true, prevScaledSize),
-						imageWithPoints(currImgPath, selectedImage, false, currScaledSize),
-					))
-				}
-			}
+	err := dx - dy
+	for {
+		img.Set(x1, y1, col)
+		if x1 == x2 && y1 == y2 {
+			break
 		}
-
-		giu.Layout{
-			giu.Label("Image Comparison"),
-			giu.Button("Generate Movie").OnClick(func() {
-				log.Println("Generate Movie button clicked. Morphing not implemented yet.")
-			}),
-			giu.Column(layouts...),
-		}.Build()
-	})
+		err2 := err * 2
+		if err2 > -dy {
+			err -= dy
+			x1 += sx
+		}
+		if err2 < dx {
+			err += dx
+			y1 += sy
+		}
+	}
 }
 
-func getScaledSize(originalSize, availableSize image.Point) image.Point {
-	if originalSize.X == 0 || originalSize.Y == 0 {
-		return image.Point{}
-	}
-	ratio := float32(originalSize.X) / float32(originalSize.Y)
-	newWidth := float32(availableSize.X)
-	newHeight := newWidth / ratio
-
-	if newHeight > float32(availableSize.Y) {
-		newHeight = float32(availableSize.Y)
-		newWidth = newHeight * ratio
-	}
-
-	return image.Point{X: int(newWidth), Y: int(newHeight)}
+func drawTriangle(img draw.Image, p1, p2, p3 image.Point, col color.Color) {
+	drawLine(img, p1.X, p1.Y, p2.X, p2.Y, col)
+	drawLine(img, p2.X, p2.Y, p3.X, p3.Y, col)
+	drawLine(img, p3.X, p3.Y, p1.X, p1.Y, col)
 }
 
-func loadImage(path string) (*giu.Texture, image.Point, error) {
-	if tex, ok := textures[path]; ok {
-		return tex.Texture, tex.Size, nil
-	}
-
-	file, err := os.Open(path)
+func loadImage(filename string) (*image.RGBA, error) {
+	file, err := os.Open(filename)
 	if err != nil {
-		return nil, image.Point{}, fmt.Errorf("failed to open image %s: %w", path, err)
+		return nil, err
 	}
 	defer file.Close()
 
-	// Decode the image
 	img, _, err := image.Decode(file)
 	if err != nil {
-		return nil, image.Point{}, fmt.Errorf("failed to decode image %s: %w", path, err)
+		return nil, err
 	}
 
-	size := img.Bounds().Size()
-
-	var rgba *image.RGBA
-	if i, ok := img.(*image.RGBA); ok {
-		rgba = i
-	} else {
-		rgba = image.NewRGBA(img.Bounds())
-		draw.Draw(rgba, rgba.Bounds(), img, image.Point{}, draw.Src)
-		img = rgba
+	rgbaImg, ok := img.(*image.RGBA)
+	if !ok {
+		rgbaImg = image.NewRGBA(img.Bounds())
+		draw.Draw(rgbaImg, rgbaImg.Bounds(), img, image.Point{}, draw.Src)
 	}
 
-	giu.NewTextureFromRgba(img, func(t *giu.Texture) {
-		textures[path] = &TextureWithSize{Texture: t, Size: size}
-	})
-	return nil, image.Point{}, nil
+	return rgbaImg, nil
 }
 
-func imageWithPoints(imgPath string, pairIndex int, isPrevImage bool, scaledSize image.Point) giu.Widget {
-	return giu.Custom(func() {
-		tex, originalSize, err := loadImage(imgPath)
-		if err != nil {
-			giu.Label(err.Error()).Build()
-			return
-		}
+func saveImage(img image.Image, filename string) error {
+	file, err := os.Create(filename)
+	if err != nil {
+		return err
+	}
+	defer file.Close()
 
-		startPos := giu.GetCursorScreenPos()
-		imgWidget := giu.Image(tex).Size(float32(scaledSize.X), float32(scaledSize.Y))
-		imgWidget.Build()
-
-		canvas := giu.GetCanvas()
-
-		scaleX := float32(scaledSize.X) / float32(originalSize.X)
-		scaleY := float32(scaledSize.Y) / float32(originalSize.Y)
-
-		if draggingPoint.isDragging && giu.IsMouseReleased(giu.MouseButtonLeft) {
-			draggingPoint.isDragging = false
-		}
-
-		if draggingPoint.isDragging && draggingPoint.pairSetIndex == pairIndex {
-			isCorrectPointToDrag := (isPrevImage && draggingPoint.isP1) || (!isPrevImage && !draggingPoint.isP1)
-			if isCorrectPointToDrag {
-				mousePos := giu.GetMousePos()
-				newPos := mousePos.Sub(startPos)
-				originalX := int(float32(newPos.X) / scaleX)
-				originalY := int(float32(newPos.Y) / scaleY)
-				if draggingPoint.isP1 {
-					points[pairIndex][draggingPoint.pairIndex].P1 = image.Pt(originalX, originalY)
-				} else {
-					points[pairIndex][draggingPoint.pairIndex].P2 = image.Pt(originalX, originalY)
-				}
-			}
-		}
-
-		if pointPairs, ok := points[pairIndex]; ok {
-			for i, p := range pointPairs {
-				var pointOnImage image.Point
-				if isPrevImage {
-					pointOnImage = p.P1
-				} else {
-					pointOnImage = p.P2
-				}
-
-				scaledX := int(float32(pointOnImage.X) * scaleX)
-				scaledY := int(float32(pointOnImage.Y) * scaleY)
-				drawPos := startPos.Add(image.Pt(scaledX, scaledY))
-
-				// Flashing logic for the non-dragged point
-				isOppositePoint := draggingPoint.isDragging &&
-					draggingPoint.pairSetIndex == pairIndex &&
-					draggingPoint.pairIndex == i &&
-					((isPrevImage && !draggingPoint.isP1) || (!isPrevImage && draggingPoint.isP1))
-
-				if isOppositePoint {
-					// Flash every half second
-					if time.Now().UnixMilli()/500%2 == 0 {
-						canvas.AddCircle(drawPos, 8, color.RGBA{R: 255, G: 255, B: 0, A: 255}, 12, 2)
-					}
-				}
-
-				canvas.AddCircleFilled(drawPos, 4, p.Color)
-
-				if draggingPoint.isDragging && draggingPoint.pairSetIndex == pairIndex && draggingPoint.pairIndex == i {
-					isCorrectPointToDrag := (isPrevImage && draggingPoint.isP1) || (!isPrevImage && !draggingPoint.isP1)
-					if isCorrectPointToDrag {
-						canvas.AddCircle(drawPos, 8, color.RGBA{R: 255, G: 255, B: 0, A: 255}, 12, 2)
-					}
-				}
-			}
-		}
-
-		if giu.IsItemHovered() {
-			if giu.IsMouseClicked(giu.MouseButtonLeft) {
-				mousePos := giu.GetMousePos()
-				clickPos := mousePos.Sub(startPos)
-
-				clickedOnPoint := false
-				if pointPairs, ok := points[pairIndex]; ok {
-					for i := len(pointPairs) - 1; i >= 0; i-- {
-						p := pointPairs[i]
-						var pointOnImage image.Point
-						if isPrevImage {
-							pointOnImage = p.P1
-						} else {
-							pointOnImage = p.P2
-						}
-
-						scaledX := int(float32(pointOnImage.X) * scaleX)
-						scaledY := int(float32(pointOnImage.Y) * scaleY)
-						distVec := clickPos.Sub(image.Pt(scaledX, scaledY))
-						if distVec.X*distVec.X+distVec.Y*distVec.Y < 10*10 {
-							draggingPoint.isDragging = true
-							draggingPoint.pairSetIndex = pairIndex
-							draggingPoint.pairIndex = i
-							draggingPoint.isP1 = isPrevImage
-							clickedOnPoint = true
-							break
-						}
-					}
-				}
-
-				if !clickedOnPoint {
-					originalX := int(float32(clickPos.X) / scaleX)
-					originalY := int(float32(clickPos.Y) / scaleY)
-					newPoint := image.Pt(originalX, originalY)
-					newColor := color.RGBA{R: uint8(rand.Intn(256)), G: uint8(rand.Intn(256)), B: uint8(rand.Intn(256)), A: 255}
-					if _, ok := points[pairIndex]; !ok {
-						points[pairIndex] = []PointPair{}
-					}
-					points[pairIndex] = append(points[pairIndex], PointPair{P1: newPoint, P2: newPoint, Color: newColor})
-				}
-			} else if giu.IsMouseClicked(giu.MouseButtonRight) {
-				mousePos := giu.GetMousePos()
-				clickPos := mousePos.Sub(startPos)
-
-				if pointPairs, ok := points[pairIndex]; ok {
-					closestDistSq := 10 * 10
-					deleteIndex := -1
-
-					for i, p := range pointPairs {
-						var pointOnImage image.Point
-						if isPrevImage {
-							pointOnImage = p.P1
-						} else {
-							pointOnImage = p.P2
-						}
-
-						scaledX := int(float32(pointOnImage.X) * scaleX)
-						scaledY := int(float32(pointOnImage.Y) * scaleY)
-						distVec := clickPos.Sub(image.Pt(scaledX, scaledY))
-						distSq := distVec.X*distVec.X + distVec.Y*distVec.Y
-						if distSq < closestDistSq {
-							closestDistSq = distSq
-							deleteIndex = i
-						}
-					}
-
-					if deleteIndex != -1 {
-						points[pairIndex] = append(pointPairs[:deleteIndex], pointPairs[deleteIndex+1:]...)
-					}
-				}
-			}
-		}
-	})
+	if err := png.Encode(file, img); err != nil {
+		return err
+	}
+	return nil
 }
 
 func main() {
-	wnd := giu.NewMasterWindow("MorphLet", 1024, 768, 0)
-	wnd.Run(loop)
+	image1Name := "Newall Timelapse Photos/20180309_183059.jpg"
+	image2Name := "Newall Timelapse Photos/20190123_121335.jpg"
+
+	points := [][2]delaunay.Point{
+		{{1205, 974}, {1026, 1066}},  // Top left
+		{{2573, 793}, {2430, 919}},   // top right
+		{{1167, 1916}, {960, 2067}},  // bottom left
+		{{2580, 1966}, {2393, 2117}}, // bottom right
+	}
+
+	img1, err := loadImage(image1Name)
+	if err != nil {
+		log.Fatalf("failed to load image %s: %v", image1Name, err)
+	}
+	img2, err := loadImage(image2Name)
+	if err != nil {
+		log.Fatalf("failed to load image %s: %v", image2Name, err)
+	}
+	log.Printf("img1: %v", img1.Bounds())
+	log.Printf("img2: %v", img2.Bounds())
+
+	img1Points := []delaunay.Point{{0, 0}, {float64(img1.Bounds().Dx() - 1), 0},
+		{0, float64(img1.Bounds().Dy() - 1)}, {float64(img1.Bounds().Dx() - 1), float64(img1.Bounds().Dy() - 1)}}
+
+	for _, p := range points {
+		img1Points = append(img1Points, p[0])
+	}
+	img2Points := []delaunay.Point{{0, 0}, {float64(img2.Bounds().Dx() - 1), 0},
+		{0, float64(img2.Bounds().Dy() - 1)}, {float64(img2.Bounds().Dx() - 1), float64(img2.Bounds().Dy() - 1)}}
+	for _, p := range points {
+		img2Points = append(img2Points, p[1])
+	}
+
+	img1Triangulate, err := delaunay.Triangulate(img1Points)
+	if err != nil {
+		log.Fatalf("Unable to triangulate image 1: %v", err)
+	}
+	log.Printf("img1 triangulation: %v", img1Triangulate.Triangles)
+	/*
+		img2Triangulate, err := delaunay.Triangulate(img2Points)
+		if err != nil {
+			log.Fatalf("Unable to triangulate image 1: %v", err)
+		}
+
+		log.Printf("img2 triangulation: %v", img2Triangulate.Triangles)
+	*/
+
+	for i := 0; i < len(img1Triangulate.Triangles); i += 3 {
+		p1 := img1Points[img1Triangulate.Triangles[i]]
+		p2 := img1Points[img1Triangulate.Triangles[i+1]]
+		p3 := img1Points[img1Triangulate.Triangles[i+2]]
+		//log.Printf("Triangle %d: (%.2f, %.2f), (%.2f, %.2f), (%.2f, %.2f)", i/3, p1.X, p1.Y, p2.X, p2.Y, p3.X, p3.Y)
+
+		drawTriangle(img1, image.Point{X: int(p1.X), Y: int(p1.Y)}, image.Point{X: int(p2.X), Y: int(p2.Y)}, image.Point{X: int(p3.X), Y: int(p3.Y)}, color.RGBA{255, 0, 0, 255})
+
+		p1 = img2Points[img1Triangulate.Triangles[i]]
+		p2 = img2Points[img1Triangulate.Triangles[i+1]]
+		p3 = img2Points[img1Triangulate.Triangles[i+2]]
+		drawTriangle(img2, image.Point{X: int(p1.X), Y: int(p1.Y)}, image.Point{X: int(p2.X), Y: int(p2.Y)}, image.Point{X: int(p3.X), Y: int(p3.Y)}, color.RGBA{0, 0, 255, 255})
+	}
+	saveImage(img1, "img1_triangles.png")
+	saveImage(img2, "img2_triangles.png")
+
+	/*
+		for i := 0; i < len(img2Triangulate.Triangles); i += 3 {
+			p1 := img2Points[img2Triangulate.Triangles[i]]
+			p2 := img2Points[img2Triangulate.Triangles[i+1]]
+			p3 := img2Points[img2Triangulate.Triangles[i+2]]
+			log.Printf("Triangle %d: (%.2f, %.2f), (%.2f, %.2f), (%.2f, %.2f)", i/3, p1.X, p1.Y, p2.X, p2.Y, p3.X, p3.Y)
+
+			drawTriangle(img2, image.Point{X: int(p1.X), Y: int(p1.Y)}, image.Point{X: int(p2.X), Y: int(p2.Y)}, image.Point{X: int(p3.X), Y: int(p3.Y)}, color.RGBA{0, 0, 255, 255})
+		}
+	*/
 }
