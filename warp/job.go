@@ -35,7 +35,7 @@ func (w *WarpJob) Run(filePrefix string, frameCount int) error {
 		return fmt.Errorf("need at least two images to warp")
 	}
 	if len(w.ImagePoints) != len(w.Images) {
-		return fmt.Errorf("need the same number of image points as images")
+		return fmt.Errorf("need the same number of image points as images (have %d images, %d image points)", len(w.Images), len(w.ImagePoints))
 	}
 	for i := 1; i < len(w.Images); i++ {
 		if w.Images[i].Bounds().Dx() != w.Images[0].Bounds().Dx() || w.Images[i].Bounds().Dy() != w.Images[0].Bounds().Dy() {
@@ -57,15 +57,18 @@ func (w *WarpJob) Run(filePrefix string, frameCount int) error {
 		return fmt.Errorf("unable to triangulate image 1: %v", err)
 	}
 	log.Printf("triangulation: %v", triangulate.Triangles)
-	parallel := sync.WaitGroup{}
 
 	fileCount := 0
+	prevImage := w.Images[0]
 	for imageIdx := 1; imageIdx < len(w.Images); imageIdx++ {
+
+		parallel := sync.WaitGroup{}
+		var prevImageCandidate *image.NRGBA
 		for count := 0; count < frameCount; count++ {
 			filename := fmt.Sprintf("%s-%05d.png", filePrefix, fileCount)
 			fileCount++
-
 			parallel.Go(func() {
+
 				alpha := float64(count) / float64(frameCount-1) // Range from 0.0 - 1.0
 
 				sourcePoints := make([]delaunay.Point, len(triangulate.Triangles))
@@ -87,7 +90,7 @@ func (w *WarpJob) Run(filePrefix string, frameCount int) error {
 
 				// Blend img1 with dst at alpha ratio
 				combined := image.NewNRGBA(dst.Bounds())
-				draw.Draw(combined, combined.Bounds(), w.Images[imageIdx-1], image.Point{0, 0}, draw.Src)
+				draw.Draw(combined, combined.Bounds(), prevImage, image.Point{0, 0}, draw.Src)
 				// Set the alpha on dst to alpha
 				alphaInt := uint8(255 * alpha)
 				for y := 0; y < dst.Bounds().Dy(); y++ {
@@ -98,9 +101,14 @@ func (w *WarpJob) Run(filePrefix string, frameCount int) error {
 				draw.Draw(combined, combined.Bounds(), dst, image.Point{0, 0}, draw.Over)
 				saveImage(combined, filename)
 				log.Printf("Finished %s", filename)
+
+				if count == frameCount-1 {
+					prevImageCandidate = dst
+				}
 			})
 		}
 		parallel.Wait()
+		prevImage = prevImageCandidate
 	}
 	return nil
 }
