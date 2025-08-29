@@ -7,6 +7,7 @@ import (
 	"image/png"
 	"log"
 	"os"
+	"runtime"
 	"sync"
 
 	"github.com/fogleman/delaunay"
@@ -15,6 +16,7 @@ import (
 type WarpJob struct {
 	Images      []*image.NRGBA
 	ImagePoints [][]delaunay.Point
+	ThreadCount int // Number of concurrent threads to use. If set to 0, uses auto detected CPU count
 }
 
 func saveImage(img image.Image, filename string) error {
@@ -60,6 +62,10 @@ func (w *WarpJob) Run(filePrefix string, frameCount int) error {
 
 	fileCount := 0
 	prevImage := w.Images[0]
+	if w.ThreadCount <= 0 {
+		w.ThreadCount = runtime.NumCPU()
+	}
+	jobCount := make(chan struct{}, w.ThreadCount)
 	for imageIdx := 1; imageIdx < len(w.Images); imageIdx++ {
 
 		parallel := sync.WaitGroup{}
@@ -67,6 +73,7 @@ func (w *WarpJob) Run(filePrefix string, frameCount int) error {
 		for count := 0; count < frameCount; count++ {
 			filename := fmt.Sprintf("%s-%05d.png", filePrefix, fileCount)
 			fileCount++
+			jobCount <- struct{}{}
 			parallel.Go(func() {
 
 				alpha := float64(count) / float64(frameCount-1) // Range from 0.0 - 1.0
@@ -105,6 +112,7 @@ func (w *WarpJob) Run(filePrefix string, frameCount int) error {
 				if count == frameCount-1 {
 					prevImageCandidate = dst
 				}
+				<-jobCount
 			})
 		}
 		parallel.Wait()
