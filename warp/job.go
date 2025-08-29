@@ -1,10 +1,10 @@
 package warp
 
 import (
+	"encoding/json"
 	"fmt"
 	"image"
 	"image/draw"
-	"image/png"
 	"log"
 	"os"
 	"runtime"
@@ -19,17 +19,9 @@ type WarpJob struct {
 	ThreadCount int // Number of concurrent threads to use. If set to 0, uses auto detected CPU count
 }
 
-func saveImage(img image.Image, filename string) error {
-	file, err := os.Create(filename)
-	if err != nil {
-		return err
-	}
-	defer file.Close()
-
-	if err := png.Encode(file, img); err != nil {
-		return err
-	}
-	return nil
+type WarpJobSaveFormat struct {
+	Images      []string  `json:"images"`
+	ImagePoints [][][]int `json:"image_points"`
 }
 
 func (w *WarpJob) Run(filePrefix string, frameCount int) error {
@@ -106,7 +98,7 @@ func (w *WarpJob) Run(filePrefix string, frameCount int) error {
 					}
 				}
 				draw.Draw(combined, combined.Bounds(), dst, image.Point{0, 0}, draw.Over)
-				saveImage(combined, filename)
+				SaveImage(combined, filename)
 				log.Printf("Finished %s", filename)
 
 				if count == frameCount-1 {
@@ -119,4 +111,40 @@ func (w *WarpJob) Run(filePrefix string, frameCount int) error {
 		prevImage = prevImageCandidate
 	}
 	return nil
+}
+
+func NewJobFromFile(filename string) (*WarpJob, error) {
+	data, err := os.ReadFile(filename)
+	if err != nil {
+		return nil, err
+	}
+	return NewJobFromJson(data)
+}
+
+func NewJobFromJson(jsonData []byte) (*WarpJob, error) {
+	var saved WarpJobSaveFormat
+	if err := json.Unmarshal(jsonData, &saved); err != nil {
+		return nil, err
+	}
+
+	var job WarpJob
+	for _, imagePoints := range saved.ImagePoints {
+		var points []delaunay.Point
+		for _, point := range imagePoints {
+			if len(point) != 2 {
+				return nil, fmt.Errorf("invalid point format: %v", point)
+			}
+			points = append(points, delaunay.Point{X: float64(point[0]), Y: float64(point[1])})
+		}
+		job.ImagePoints = append(job.ImagePoints, points)
+	}
+	for _, imageName := range saved.Images {
+		img, err := LoadImage(imageName)
+
+		if err != nil {
+			return nil, err
+		}
+		job.Images = append(job.Images, img)
+	}
+	return &job, nil
 }
