@@ -27,6 +27,12 @@ var (
 	splitSize       float32 = 250
 	newImagePath    string
 	textures        = make(map[string]*TextureWithSize)
+	draggingPoint   struct {
+		isDragging   bool
+		imageIndex   int
+		pointIndex   int
+		dragStartPos image.Point
+	}
 )
 
 func onNewProject() {
@@ -275,33 +281,108 @@ func clickableImage(tex *giu.Texture, scaledSize image.Point, originalSize image
 		scaleX := float32(scaledSize.X) / float32(originalSize.X)
 		scaleY := float32(scaledSize.Y) / float32(originalSize.Y)
 
-		// Draw existing points
-		if currentJob != nil {
-			for i, pointPair := range currentJob.ImagePoints[imageIndex] {
-				var pointOnImage image.Point
-				pointOnImage = image.Pt(pointPair[0], pointPair[1])
+		// Handle mouse dragging
+		if giu.IsItemHovered() {
+			mousePos := giu.GetMousePos()
+			clickPos := mousePos.Sub(startPos)
 
-				// Convert to display coordinates
-				displayX := int(float32(pointOnImage.X) * scaleX)
-				displayY := int(float32(pointOnImage.Y) * scaleY)
-				drawPos := startPos.Add(image.Pt(displayX, displayY))
+			if giu.IsMouseClicked(giu.MouseButtonLeft) {
+				// Check if clicking near an existing point
+				if currentJob != nil && len(currentJob.ImagePoints) > imageIndex {
+					for pointIdx, pointPair := range currentJob.ImagePoints[imageIndex] {
+						if len(pointPair) >= 2 {
+							pointOnImage := image.Pt(pointPair[0], pointPair[1])
+							displayX := int(float32(pointOnImage.X) * scaleX)
+							displayY := int(float32(pointOnImage.Y) * scaleY)
+							displayPoint := image.Pt(displayX, displayY)
 
-				// Draw the point with a unique color for each pair
-				colors := []color.RGBA{
-					{R: 255, G: 0, B: 0, A: 255},   // Red
-					{R: 0, G: 255, B: 0, A: 255},   // Green
-					{R: 0, G: 0, B: 255, A: 255},   // Blue
-					{R: 255, G: 255, B: 0, A: 255}, // Yellow
-					{R: 255, G: 0, B: 255, A: 255}, // Magenta
-					{R: 0, G: 255, B: 255, A: 255}, // Cyan
+							// Check if click is within 10 pixels of the point
+							dx := clickPos.X - displayPoint.X
+							dy := clickPos.Y - displayPoint.Y
+							distSq := dx*dx + dy*dy
+							if distSq <= 10*10 {
+								// Start dragging this point
+								draggingPoint.isDragging = true
+								draggingPoint.imageIndex = imageIndex
+								draggingPoint.pointIndex = pointIdx
+								draggingPoint.dragStartPos = clickPos
+								break
+							}
+						}
+					}
 				}
-				pointColor := colors[i%len(colors)]
-
-				canvas.AddCircleFilled(drawPos, 4, pointColor)
-				canvas.AddCircle(drawPos, 6, color.RGBA{R: 255, G: 255, B: 255, A: 255}, 12, 1)
 			}
 		}
 
+		// Handle dragging update
+		if draggingPoint.isDragging && draggingPoint.imageIndex == imageIndex {
+			if giu.IsMouseDown(giu.MouseButtonLeft) {
+				mousePos := giu.GetMousePos()
+				currentPos := mousePos.Sub(startPos)
+
+				// Convert to original image coordinates
+				originalX := int(float32(currentPos.X) / scaleX)
+				originalY := int(float32(currentPos.Y) / scaleY)
+
+				// Clamp to image bounds
+				if originalX < 0 {
+					originalX = 0
+				}
+				if originalX >= originalSize.X {
+					originalX = originalSize.X - 1
+				}
+				if originalY < 0 {
+					originalY = 0
+				}
+				if originalY >= originalSize.Y {
+					originalY = originalSize.Y - 1
+				}
+
+				// Update the point position
+				if currentJob != nil && len(currentJob.ImagePoints) > imageIndex &&
+					draggingPoint.pointIndex < len(currentJob.ImagePoints[imageIndex]) {
+					currentJob.ImagePoints[imageIndex][draggingPoint.pointIndex][0] = originalX
+					currentJob.ImagePoints[imageIndex][draggingPoint.pointIndex][1] = originalY
+				}
+			} else {
+				// Mouse released, stop dragging
+				draggingPoint.isDragging = false
+			}
+		}
+
+		// Draw existing points
+		if currentJob != nil && len(currentJob.ImagePoints) > imageIndex {
+			for i, pointPair := range currentJob.ImagePoints[imageIndex] {
+				if len(pointPair) >= 2 {
+					pointOnImage := image.Pt(pointPair[0], pointPair[1])
+
+					// Convert to display coordinates
+					displayX := int(float32(pointOnImage.X) * scaleX)
+					displayY := int(float32(pointOnImage.Y) * scaleY)
+					drawPos := startPos.Add(image.Pt(displayX, displayY))
+
+					// Draw the point with a unique color for each pair
+					colors := []color.RGBA{
+						{R: 255, G: 0, B: 0, A: 255},   // Red
+						{R: 0, G: 255, B: 0, A: 255},   // Green
+						{R: 0, G: 0, B: 255, A: 255},   // Blue
+						{R: 255, G: 255, B: 0, A: 255}, // Yellow
+						{R: 255, G: 0, B: 255, A: 255}, // Magenta
+						{R: 0, G: 255, B: 255, A: 255}, // Cyan
+					}
+					pointColor := colors[i%len(colors)]
+
+					// Highlight the point being dragged
+					if draggingPoint.isDragging && draggingPoint.imageIndex == imageIndex && draggingPoint.pointIndex == i {
+						canvas.AddCircleFilled(drawPos, 6, pointColor)
+						canvas.AddCircle(drawPos, 8, color.RGBA{R: 255, G: 255, B: 255, A: 255}, 12, 2)
+					} else {
+						canvas.AddCircleFilled(drawPos, 4, pointColor)
+						canvas.AddCircle(drawPos, 6, color.RGBA{R: 255, G: 255, B: 255, A: 255}, 12, 1)
+					}
+				}
+			}
+		}
 	})
 }
 
