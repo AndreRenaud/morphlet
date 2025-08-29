@@ -89,9 +89,52 @@ func imagePane() giu.Widget {
 	for i := range currentJob.Images {
 		imgLabel := fmt.Sprintf("%d: %s", i+1, currentJob.Images[i])
 		localI := i
-		imageWidgets[i] = giu.Selectable(imgLabel).Selected(selectedImage == localI).OnClick(func() {
-			selectedImage = localI
-		})
+
+		// Create a row with selectable image name and up/down buttons on the right
+		imageWidgets[i] = giu.Row(
+			giu.Selectable(imgLabel).Selected(selectedImage == localI).OnClick(func() {
+				selectedImage = localI
+			}), // Let the selectable take available space
+			giu.Dummy(1, 0), // Spacer to push buttons to the right
+			giu.Button("↑").Size(25, 0).OnClick(func() {
+				// Move image up (swap with previous)
+				if localI > 0 && currentJob != nil {
+					// Swap images
+					currentJob.Images[localI], currentJob.Images[localI-1] = currentJob.Images[localI-1], currentJob.Images[localI]
+
+					// Swap image points if they exist
+					if len(currentJob.ImagePoints) > localI && len(currentJob.ImagePoints) > localI-1 {
+						currentJob.ImagePoints[localI], currentJob.ImagePoints[localI-1] = currentJob.ImagePoints[localI-1], currentJob.ImagePoints[localI]
+					}
+
+					// Update selected image index if needed
+					if selectedImage == localI {
+						selectedImage = localI - 1
+					} else if selectedImage == localI-1 {
+						selectedImage = localI
+					}
+				}
+			}).Disabled(localI == 0), // Disable up button for first item
+			giu.Button("↓").Size(25, 0).OnClick(func() {
+				// Move image down (swap with next)
+				if localI < len(currentJob.Images)-1 && currentJob != nil {
+					// Swap images
+					currentJob.Images[localI], currentJob.Images[localI+1] = currentJob.Images[localI+1], currentJob.Images[localI]
+
+					// Swap image points if they exist
+					if len(currentJob.ImagePoints) > localI && len(currentJob.ImagePoints) > localI+1 {
+						currentJob.ImagePoints[localI], currentJob.ImagePoints[localI+1] = currentJob.ImagePoints[localI+1], currentJob.ImagePoints[localI]
+					}
+
+					// Update selected image index if needed
+					if selectedImage == localI {
+						selectedImage = localI + 1
+					} else if selectedImage == localI+1 {
+						selectedImage = localI
+					}
+				}
+			}).Disabled(localI == len(currentJob.Images)-1), // Disable down button for last item
+		)
 	}
 
 	return giu.Layout{
