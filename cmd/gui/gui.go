@@ -14,6 +14,7 @@ import (
 
 	"github.com/AllenDang/giu"
 	"github.com/AndreRenaud/morphlet/warp"
+	"github.com/sqweek/dialog"
 )
 
 type TextureWithSize struct {
@@ -26,8 +27,7 @@ var (
 	currentJob      *warp.WarpJobSaveFormat
 	selectedImage           = -1
 	splitSize       float32 = 250
-	newImagePath    string
-	textures        = make(map[string]*TextureWithSize)
+	textures                = make(map[string]*TextureWithSize)
 	draggingPoint   struct {
 		isDragging   bool
 		imageIndex   int
@@ -130,6 +130,11 @@ func imagePane() giu.Widget {
 					}
 				}
 			}).Disabled(localI == len(currentJob.Images)-1), // Disable down button for last item
+			giu.Button("x").Size(25, 0).OnClick(func() {
+				// Remove the image and its points
+				currentJob.Images = append(currentJob.Images[:localI], currentJob.Images[localI+1:]...)
+				currentJob.ImagePoints = append(currentJob.ImagePoints[:localI], currentJob.ImagePoints[localI+1:]...)
+			}),
 			giu.Selectable(imgLabel).Selected(selectedImage == localI).OnClick(func() {
 				selectedImage = localI
 			}), // Let the selectable take available space
@@ -137,11 +142,10 @@ func imagePane() giu.Widget {
 	}
 
 	return giu.Layout{
-		giu.Label("Images"),
-		giu.InputText(&newImagePath).Hint("path/to/image.png"),
 		giu.Row(
 			giu.Button("Add Image").OnClick(func() {
-				if newImagePath != "" {
+				newImagePath, err := dialog.File().Filter("Images", ".png,.jpg,.jpeg").Title("Select an image").Load()
+				if err == nil && newImagePath != "" {
 					currentJob.Images = append(currentJob.Images, newImagePath)
 
 					// Copy points from image 0 if it exists, otherwise create empty point list
@@ -156,17 +160,6 @@ func imagePane() giu.Widget {
 						}
 					}
 					currentJob.ImagePoints = append(currentJob.ImagePoints, newImagePoints)
-					newImagePath = ""
-				}
-			}),
-			giu.Button("Remove Image").OnClick(func() {
-				if selectedImage >= 0 && selectedImage < len(currentJob.Images) {
-					// Remove the image and its points
-					currentJob.Images = append(currentJob.Images[:selectedImage], currentJob.Images[selectedImage+1:]...)
-					currentJob.ImagePoints = append(currentJob.ImagePoints[:selectedImage], currentJob.ImagePoints[selectedImage+1:]...)
-					if selectedImage >= len(currentJob.Images) {
-						selectedImage = len(currentJob.Images) - 1
-					}
 				}
 			}),
 		),
@@ -205,7 +198,7 @@ func comparisonPane() giu.Widget {
 					scaledSize := getScaledSize(size, image.Pt(int(availW), int(availH)))
 					layouts = append(layouts, giu.Row(simpleImage(tex, scaledSize)))
 				}
-			} else if selectedImage > 0 {
+			} else if selectedImage > 0 && selectedImage < len(currentJob.Images) {
 				// Non-zero image selected - show image 0 beside selected image
 				layouts = append(layouts, giu.Label(fmt.Sprintf("Comparing image 0 with image %d", selectedImage)))
 
