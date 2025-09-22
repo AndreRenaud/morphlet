@@ -1,6 +1,6 @@
 module github.com/AndreRenaud/morphlet
 
-go 1.25.0
+go 1.25.1
 
 require (
 	github.com/AllenDang/cimgui-go v1.3.2-0.20250409185506-6b2ff1aa26b5
@@ -24,8 +24,8 @@ require (
 	github.com/sahilm/fuzzy v0.1.1 // indirect
 	golang.design/x/hotkey v0.4.1 // indirect
 	golang.design/x/mainthread v0.3.0 // indirect
-	golang.org/x/image v0.30.0 // indirect
-	golang.org/x/sys v0.35.0 // indirect
-	golang.org/x/term v0.34.0 // indirect
+	golang.org/x/image v0.31.0 // indirect
+	golang.org/x/sys v0.36.0 // indirect
+	golang.org/x/term v0.35.0 // indirect
 	gopkg.in/eapache/queue.v1 v1.1.0 // indirect
 )
